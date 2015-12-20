@@ -7,7 +7,7 @@ from subprocess import Popen, PIPE
 class GotoWindowCommand(sublime_plugin.WindowCommand):
     def run(self):
         folders = self._get_folders()
-
+        
         folders_alone = [x for (x, y) in folders]
         folders_for_list = []
         for folder in folders_alone:
@@ -26,38 +26,41 @@ class GotoWindowCommand(sublime_plugin.WindowCommand):
 
         self.focus(window_to_move_to)
 
-        # Hack needed for OS X due to this bug
-        # https://github.com/SublimeTextIssues/Core/issues/444
+    def focus(self, window_to_move_to):
+
+        active_view = window_to_move_to.active_view()
+        active_group = window_to_move_to.active_group()
+
         if sublime.platform() == 'osx':
             name = 'Sublime Text'
             if int(sublime.version()) < 3000:
                 name = 'Sublime Text 2'
 
-            # This is some magic. I spent many many hours trying to find a
-            # workaround for the Sublime Text bug. I found a bunch of ugly
-            # solutions, but this was the simplest one I could figure out.
-            #
-            # Basically you have to activate an application that is not Sublime
-            # then wait and then activate sublime. I picked "Dock" because it
-            # is always running in the background so it won't screw up your
-            # command+tab order. The delay of 1/60 of a second is the minimum
-            # supported by Applescript.
+            cmd_context = {
+                'window_filename': active_view.file_name().replace(os.getenv('HOME'), '~'),
+                'name': name
+            }
+
             cmd = """
+                set window_filename to "{window_filename}"
+
                 tell application "System Events"
-                    activate application "Dock"
-                    delay 1/60
-                    activate application "%s"
-                end tell""" % name
+                    tell process "{name}"
+                        set menuItems to name of every menu item of menu 1 of menu bar item "Window" of menu bar 1
+                        repeat with menuItem in menuItems
+                            if {{menuItem starts with window_filename}} then
+                                tell application "System Events" to tell process "Sublime Text"
+                                    click menu item menuItem of menu 1 of menu bar item "Window" of menu bar 1
+                                    tell application "{name}" to activate
+                                end tell
+                            end if
+                        end repeat
+                    end tell
+                end tell
+            """.format(**cmd_context)
 
             Popen(['/usr/bin/osascript', "-e", cmd], stdout=PIPE, stderr=PIPE)
-
-    def focus(self, window_to_move_to):
-        active_view = window_to_move_to.active_view()
-        active_group = window_to_move_to.active_group()
-
-        # In Sublime Text 2 if a folder has no open files in it the active view
-        # will return None. This tries to use the actives view and falls back
-        # to using the active group
+            return
 
         # Calling focus then the command then focus again is needed to make this
         # work on Windows
